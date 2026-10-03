@@ -1,0 +1,935 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Customer Insight Generator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+/* Layout: an analyst's ledger — sticky header + section rail, then summary → segments → retention → customers → AI, each a full-width band */
+:root{
+  --bg:#0f1520; --surface:#161e2c; --surface-2:#1c2637; --line:#283347; --fg:#e7eaf1; --muted:#8e99b0;
+  --accent:#f0a43a; --accent-ink:#1b1306; --teal:#4fb3a6;
+  --good:#4cbf8a; --warn:#e07a3f; --crit:#e5636f; --cold:#7d8aa6;
+  --f-display:"Fraunces",Georgia,"Times New Roman",serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+  --r:10px; color-scheme:dark;
+}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){
+  --bg:#f3f4f7; --surface:#ffffff; --surface-2:#f7f8fb; --line:#dde1ea; --fg:#151a25; --muted:#5b6478;
+  --accent:#b8690a; --accent-ink:#ffffff; --teal:#1d877a;
+  --good:#22855a; --warn:#c2561c; --crit:#c13a47; --cold:#6b7690; color-scheme:light }}
+:root[data-theme="light"]{
+  --bg:#f3f4f7; --surface:#ffffff; --surface-2:#f7f8fb; --line:#dde1ea; --fg:#151a25; --muted:#5b6478;
+  --accent:#b8690a; --accent-ink:#ffffff; --teal:#1d877a;
+  --good:#22855a; --warn:#c2561c; --crit:#c13a47; --cold:#6b7690; color-scheme:light }
+*{box-sizing:border-box}
+html,body{background:var(--bg);color:var(--fg)}
+body{font:15px/1.55 var(--f-body);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:20px;padding-block:0 64px}
+h1,h2,h3{font-family:var(--f-display);font-weight:650;letter-spacing:-.01em;text-wrap:balance;margin:0}
+h2{font-size:1.55rem}
+h3{font-size:1.05rem;font-weight:500}
+.mono,.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.eyebrow{font:500 .72rem/1 var(--f-body);text-transform:uppercase;letter-spacing:.12em;color:var(--muted)}
+button,select,input,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface-2);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:500;font-size:.9rem;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.primary:hover{filter:brightness(1.07)}
+.btn:disabled{opacity:.55;cursor:default}
+.linkbtn{background:none;border:0;padding:0;color:var(--accent);cursor:pointer;font-weight:500;text-decoration:underline;text-underline-offset:3px}
+
+/* header */
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.top-in{max-width:1180px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.brand{display:flex;align-items:baseline;gap:10px;min-width:0}
+.brand h1{font-size:1.3rem}
+.mark{width:22px;height:22px;flex:none;align-self:center}
+.source{display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--muted);min-width:0}
+.source .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);flex:none}
+.source b{color:var(--fg);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.top-actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.rail{max-width:1180px;margin:0 auto;padding:0 20px;display:flex;gap:4px;overflow-x:auto;scrollbar-width:none}
+.rail a{color:var(--muted);text-decoration:none;font-size:.85rem;padding:8px 10px;border-bottom:2px solid transparent;white-space:nowrap}
+.rail a:hover{color:var(--fg);border-bottom-color:var(--line)}
+
+/* upload */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:20px}
+#uploader{margin-top:20px}
+.drop{border:1.5px dashed var(--line);border-radius:var(--r);padding:28px 20px;display:grid;gap:10px;justify-items:center;text-align:center;cursor:pointer;background:var(--surface-2)}
+.drop.over{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--surface-2))}
+.drop strong{font-family:var(--f-display);font-size:1.15rem;font-weight:500}
+.upl-grid{display:grid;grid-template-columns:1.2fr 1fr;gap:20px;align-items:start}
+.cols-help{font-size:.88rem}
+.cols-help table{border-collapse:collapse;width:100%;margin-top:8px}
+.cols-help td{padding:5px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.cols-help td:first-child{font-family:var(--f-mono);font-size:.8rem;padding-right:12px;white-space:nowrap}
+.req{color:var(--accent);font-size:.72rem;font-family:var(--f-body);margin-left:6px}
+.map-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-top:14px}
+.field{display:grid;gap:4px;font-size:.82rem}
+.field select,.field input{background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:7px 9px;min-width:0;width:100%}
+.err{color:var(--crit);font-size:.88rem}
+
+/* sections */
+section.band{padding-top:44px;scroll-margin-top:110px}
+.band-head{display:flex;align-items:end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+.band-head p{margin:4px 0 0;max-width:62ch;color:var(--muted);font-size:.92rem}
+
+/* KPIs */
+.kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));border:1px solid var(--line);border-radius:var(--r);background:var(--surface);overflow:hidden}
+.kpi{padding:16px 16px 14px;border-right:1px solid var(--line);display:grid;gap:4px;min-width:0}
+.kpi:last-child{border-right:0}
+.kpi .v{font:500 1.45rem/1.15 var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi .s{font-size:.78rem;color:var(--muted)}
+.kpi.alert .v{color:var(--crit)}
+
+.two{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:16px;margin-top:16px}
+.three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px;min-width:0}
+.card-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.legend{display:flex;gap:14px;font-size:.78rem;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.chart svg{width:100%;height:auto;display:block}
+.chart text{font-family:var(--f-mono);font-size:10px;fill:var(--muted)}
+.readout{font-size:.8rem;color:var(--muted);min-height:1.4em;margin-top:6px}
+.readout b{color:var(--fg);font-weight:500}
+
+.reads{display:grid;gap:14px;margin:0;padding:0;list-style:none}
+.reads li{display:grid;grid-template-columns:8px 1fr;gap:12px;font-size:.9rem}
+.reads li::before{content:"";width:8px;height:8px;border-radius:50%;margin-top:7px;background:var(--tone,var(--accent))}
+.reads b{font-weight:600}
+
+.barlist{display:grid;gap:9px}
+.barrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;font-size:.85rem}
+.barrow .track{grid-column:1/-1;height:6px;border-radius:3px;background:var(--surface-2);overflow:hidden}
+.barrow .fill{height:100%;background:var(--teal);border-radius:3px}
+
+/* segments */
+.seg-table{width:100%;border-collapse:collapse;font-size:.88rem}
+.seg-table th{text-align:left;font-weight:500;color:var(--muted);font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;padding:0 10px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+.seg-table td{padding:11px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+.seg-table tr:last-child td{border-bottom:0}
+.seg-table tbody tr{cursor:pointer}
+.seg-table tbody tr:hover td{background:var(--surface-2)}
+.seg-name{display:flex;align-items:center;gap:9px;font-weight:600;white-space:nowrap}
+.sw{width:10px;height:10px;border-radius:3px;flex:none}
+.play{color:var(--muted);font-size:.84rem;min-width:220px}
+.mini{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.mini .track{width:70px;height:5px;border-radius:3px;background:var(--surface-2);overflow:hidden}
+.mini .fill{height:100%}
+.scroll{overflow-x:auto}
+.status-bar{display:flex;height:14px;border-radius:7px;overflow:hidden;margin:6px 0 12px;gap:2px}
+.status-legend{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.status-legend div{font-size:.84rem}
+.status-legend .num{font-size:1.05rem;display:block}
+
+/* chips */
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:999px;font-size:.76rem;font-weight:500;white-space:nowrap;background:color-mix(in srgb,var(--tone) 16%,transparent);color:var(--tone)}
+.chip::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--tone)}
+
+/* cohorts */
+.cohort{border-collapse:separate;border-spacing:2px;font-family:var(--f-mono);font-size:.74rem;font-variant-numeric:tabular-nums}
+.cohort th{font-weight:400;color:var(--muted);padding:4px 6px;text-align:center;white-space:nowrap}
+.cohort th.rowh{text-align:left}
+.cohort td{width:44px;height:28px;text-align:center;border-radius:4px;color:var(--fg)}
+.cohort td.na{background:transparent}
+
+/* customers */
+.filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.filters input,.filters select{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:0}
+.filters input{flex:1 1 220px}
+.cust{width:100%;border-collapse:collapse;font-size:.86rem;min-width:860px}
+.cust th{text-align:left;font-weight:500;color:var(--muted);font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;padding:10px;border-bottom:1px solid var(--line);cursor:pointer;user-select:none;white-space:nowrap;background:var(--surface)}
+.cust th.r,.cust td.r{text-align:right}
+.cust th[data-dir]::after{content:attr(data-dir);margin-left:4px;color:var(--accent)}
+.cust td{padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+.cust td small{display:block;color:var(--muted);font-family:var(--f-mono);font-size:.72rem}
+.tablebox{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow-x:auto}
+.more{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px;font-size:.85rem;color:var(--muted);flex-wrap:wrap}
+
+/* AI */
+.ai-grid{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:16px}
+.ai-out{display:grid;gap:12px;margin-top:14px}
+.ai-card{border-top:1px solid var(--line);padding-top:12px;display:grid;gap:4px}
+.ai-card:first-child{border-top:0;padding-top:0}
+.ai-card h4{margin:0;font:600 .98rem/1.35 var(--f-body)}
+.ai-card p{margin:0;font-size:.9rem;color:var(--muted)}
+.ai-card .act{color:var(--fg);font-size:.88rem}
+.ai-card .act b{color:var(--accent);font-weight:600}
+.ai-head{font-family:var(--f-display);font-size:1.2rem;line-height:1.35;margin:0}
+.ask{display:flex;gap:8px;margin-top:10px}
+.ask input{flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:9px 11px}
+.answer{white-space:pre-wrap;font-size:.9rem;margin-top:12px;line-height:1.6}
+.sugg{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.sugg button{background:var(--surface-2);border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:.78rem;cursor:pointer;color:var(--muted)}
+.sugg button:hover{color:var(--fg)}
+.note{font-size:.84rem;color:var(--muted);border-left:2px solid var(--line);padding-left:10px}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:9px 16px;border-radius:8px;font-size:.88rem;z-index:50;max-width:calc(100% - 32px)}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+footer{margin-top:48px;font-size:.8rem;color:var(--muted)}
+
+@media (max-width:980px){
+  .kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .kpi:nth-child(3n){border-right:0}
+  .kpi:nth-child(-n+3){border-bottom:1px solid var(--line)}
+  .two,.ai-grid,.upl-grid{grid-template-columns:minmax(0,1fr)}
+  .three{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:560px){
+  .wrap{padding-inline:16px}
+  .top-in,.rail{padding-inline:16px}
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .kpi{border-right:1px solid var(--line)!important;border-bottom:1px solid var(--line)}
+  .kpi:nth-child(2n){border-right:0!important}
+  .kpi:nth-last-child(-n+2){border-bottom:0}
+  .kpi .v{font-size:1.2rem}
+  .brand h1{font-size:1.1rem}
+  .top-actions .btn{padding:7px 10px;font-size:.84rem}
+}
+</style>
+
+<header class="top">
+  <div class="top-in">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="13" width="4" height="9" rx="1" style="fill:var(--teal)"/><rect x="10" y="8" width="4" height="14" rx="1" style="fill:var(--teal);opacity:.7"/><rect x="18" y="3" width="4" height="19" rx="1" style="fill:var(--accent)"/></svg>
+      <h1>Customer Insight Generator</h1>
+    </div>
+    <div class="source"><span class="dot" id="srcDot"></span><b id="srcName">Sample data</b><span id="srcMeta"></span></div>
+    <div class="top-actions">
+      <button class="btn primary" id="btnUpload" type="button">Upload orders</button>
+      <button class="btn" id="btnReport" type="button">Download report</button>
+      <button class="btn" id="btnCsv" type="button">Export CSV</button>
+    </div>
+  </div>
+  <nav class="rail" aria-label="Sections">
+    <a href="#overview">Overview</a><a href="#segments">RFM segments</a><a href="#retention">Retention</a><a href="#customers">Customers</a><a href="#ai">AI insights</a>
+  </nav>
+</header>
+
+<main class="wrap">
+  <div id="uploader" class="panel" hidden>
+    <div class="upl-grid">
+      <div>
+        <label class="drop" id="drop" for="file">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 15V4m0 0-4 4m4-4 4 4M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" style="stroke:var(--accent)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <strong>Drop an order export here</strong>
+          <span class="muted" style="font-size:.88rem">CSV from Shopify, WooCommerce, Tally, Zoho, Razorpay or any spreadsheet. One row per order or per order line. Stays in your browser.</span>
+          <span class="btn">Choose CSV file</span>
+          <input type="file" id="file" accept=".csv,.tsv,.txt,text/csv" hidden>
+        </label>
+        <div id="mapper" hidden style="margin-top:18px">
+          <div class="card-h"><h3>Match your columns</h3><span class="muted" id="mapInfo" style="font-size:.82rem"></span></div>
+          <div class="map-grid" id="mapGrid"></div>
+          <div style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap">
+            <button class="btn primary" id="btnAnalyze" type="button">Analyse customers</button>
+            <span class="err" id="mapErr"></span>
+          </div>
+        </div>
+        <p class="err" id="upErr"></p>
+      </div>
+      <div class="cols-help">
+        <div class="eyebrow">What the file needs</div>
+        <table>
+          <tr><td>customer<span class="req">required</span></td><td>Customer ID, email or phone. Same person, same value.</td></tr>
+          <tr><td>date<span class="req">required</span></td><td>Order date. DD-MM-YYYY, YYYY-MM-DD and most other formats work.</td></tr>
+          <tr><td>amount<span class="req">required</span></td><td>Order or line value. ₹ signs and commas are fine.</td></tr>
+          <tr><td>order id</td><td>Groups line items into one order.</td></tr>
+          <tr><td>name, city, category</td><td>Adds names to the table and mix breakdowns.</td></tr>
+        </table>
+        <p style="margin-top:12px">Want to see it with demo numbers? <button class="linkbtn" id="btnSample" type="button">Reload sample data</button></p>
+      </div>
+    </div>
+  </div>
+
+  <section class="band" id="overview">
+    <div class="band-head">
+      <div>
+        <div class="eyebrow" id="asOf"></div>
+        <h2>How your customer base is doing</h2>
+      </div>
+      <label class="field" style="width:130px">Currency
+        <select id="currency"><option value="INR">₹ INR</option><option value="USD">$ USD</option><option value="EUR">€ EUR</option><option value="GBP">£ GBP</option><option value="AED">AED</option></select>
+      </label>
+    </div>
+    <div class="kpis" id="kpis"></div>
+    <div class="two">
+      <div class="card">
+        <div class="card-h"><h3>Monthly revenue: new vs returning</h3>
+          <div class="legend"><span><i style="background:var(--accent)"></i>First-month buyers</span><span><i style="background:var(--teal)"></i>Returning</span></div>
+        </div>
+        <div class="chart" id="monthly"></div>
+        <div class="readout" id="monthlyRead">Hover a month for detail.</div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h3>Quick reads</h3><span class="eyebrow">from the numbers</span></div>
+        <ul class="reads" id="reads"></ul>
+      </div>
+    </div>
+    <div class="three" id="mix"></div>
+  </section>
+
+  <section class="band" id="segments">
+    <div class="band-head">
+      <div>
+        <div class="eyebrow">Recency · Frequency · Monetary</div>
+        <h2>RFM segments</h2>
+        <p>Recency and spend are scored in quintiles across your customers. Frequency uses order counts: 1, 2, 3, 4–5, 6+. Click a segment to see its customers.</p>
+      </div>
+    </div>
+    <div class="two" style="margin-top:0;grid-template-columns:minmax(0,1.9fr) minmax(0,1fr)">
+      <div class="card scroll" style="padding:14px 8px">
+        <table class="seg-table" id="segTable"></table>
+      </div>
+      <div class="card">
+        <div class="card-h"><h3>Churn status</h3><span class="eyebrow">vs. own buying rhythm</span></div>
+        <p class="muted" style="font-size:.84rem;margin:0">Days since last order compared with the gap each customer normally leaves between orders. One-time buyers are compared with your store's typical time to a second order.</p>
+        <div class="status-bar" id="statusBar"></div>
+        <div class="status-legend" id="statusLegend"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="retention">
+    <div class="band-head">
+      <div>
+        <div class="eyebrow">Monthly acquisition cohorts</div>
+        <h2>Who comes back</h2>
+        <p>Each row is the customers whose first order fell in that month. Cells show the share who ordered again N months later.</p>
+      </div>
+    </div>
+    <div class="two" style="margin-top:0;grid-template-columns:minmax(0,1.9fr) minmax(0,1fr)">
+      <div class="card scroll" id="cohortBox"></div>
+      <div class="card">
+        <div class="card-h"><h3>The second order</h3></div>
+        <div id="secondOrder"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="customers">
+    <div class="band-head">
+      <div>
+        <div class="eyebrow">Scored customer list</div>
+        <h2>Customers</h2>
+      </div>
+    </div>
+    <div class="filters">
+      <input id="q" type="search" placeholder="Search name, ID or city" aria-label="Search customers">
+      <select id="fSeg" aria-label="Segment"></select>
+      <select id="fStatus" aria-label="Status"><option value="">All statuses</option><option>Active</option><option>Cooling</option><option>At risk</option><option>Lapsed</option></select>
+    </div>
+    <div class="tablebox">
+      <table class="cust" id="custTable"></table>
+      <div class="more"><span id="custCount"></span><button class="btn" id="btnMore" type="button">Show 50 more</button></div>
+    </div>
+  </section>
+
+  <section class="band" id="ai">
+    <div class="band-head">
+      <div>
+        <div class="eyebrow">Powered by Claude</div>
+        <h2>AI insights</h2>
+        <p>Claude reads an aggregate summary of this analysis (segment totals, retention, mix) and writes a prioritised action plan. Individual customer rows are not sent.</p>
+      </div>
+    </div>
+    <div class="ai-grid">
+      <div class="card">
+        <div class="card-h"><h3>Action plan</h3><button class="btn primary" id="btnAI" type="button">Generate insights</button></div>
+        <div id="aiOut" class="ai-out"><p class="note">Press Generate to get five prioritised moves for this customer base, each tied to a segment and a number.</p></div>
+      </div>
+      <div class="card">
+        <h3>Ask about your customers</h3>
+        <div class="ask"><input id="askQ" type="text" placeholder="e.g. Which segment should I target for Diwali?"><button class="btn" id="btnAsk" type="button">Ask</button></div>
+        <div class="sugg" id="sugg">
+          <button type="button">What should my WhatsApp win-back offer be?</button>
+          <button type="button">Why is retention dropping?</button>
+          <button type="button">Draft a loyalty programme for Champions</button>
+        </div>
+        <div class="answer" id="askOut"></div>
+      </div>
+    </div>
+    <p class="note" id="aiUnavailable" hidden style="margin-top:12px">AI insights run when this page is opened on claude.ai. The numbers and quick reads above work everywhere.</p>
+  </section>
+
+  <footer>Analysis runs entirely in your browser. Uploaded files are not stored or sent anywhere; only the aggregate summary goes to Claude when you ask for insights.</footer>
+</main>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(()=>{
+'use strict';
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const DAY=864e5;
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+/* ---------- formatting ---------- */
+const CUR={INR:'₹',USD:'$',EUR:'€',GBP:'£',AED:'AED '};
+let currency='INR';
+function money(v,compact=true){
+  const sym=CUR[currency];
+  if(!compact) return sym+Math.round(v).toLocaleString(currency==='INR'?'en-IN':'en-US');
+  const a=Math.abs(v);
+  if(currency==='INR'){
+    if(a>=1e7) return sym+(v/1e7).toFixed(a>=1e8?1:2)+' Cr';
+    if(a>=1e5) return sym+(v/1e5).toFixed(a>=1e6?1:2)+' L';
+    if(a>=1e3) return sym+(v/1e3).toFixed(1)+'K';
+    return sym+Math.round(v);
+  }
+  return sym+new Intl.NumberFormat('en-US',{notation:'compact',maximumFractionDigits:1}).format(v);
+}
+const int=v=>Math.round(v).toLocaleString('en-IN');
+const pct=(v,d=0)=>(v*100).toFixed(d)+'%';
+const dstr=day=>{const d=new Date(day*DAY);return d.getUTCDate()+' '+MON[d.getUTCMonth()]+' '+d.getUTCFullYear()};
+const mlabel=m=>MON[m%12]+' '+String(Math.floor(m/12)).slice(2);
+const median=a=>{if(!a.length)return 0;const s=[...a].sort((x,y)=>x-y),h=s.length>>1;return s.length%2?s[h]:(s[h-1]+s[h])/2};
+const quant=(sorted,q)=>sorted[Math.min(sorted.length-1,Math.floor(q*sorted.length))];
+function toast(msg){const t=$('#toast');t.textContent=msg;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,2600)}
+
+/* ---------- sample data: a D2C pantry brand, Oct 2024 – Sep 2026 ---------- */
+function makeSample(){
+  let s=20261003;const rnd=()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
+  const pick=(arr,w)=>{if(!w)return arr[Math.floor(rnd()*arr.length)];let r=rnd()*w.reduce((a,b)=>a+b,0);for(let i=0;i<arr.length;i++){r-=w[i];if(r<=0)return arr[i]}return arr[arr.length-1]};
+  const first=['Aarav','Diya','Vihaan','Ananya','Kabir','Isha','Arjun','Meera','Rohan','Priya','Kunal','Neha','Yash','Riya','Dhruv','Pooja','Aditya','Sneha','Harsh','Kavya','Nikhil','Tanvi','Rahul','Shreya','Manav','Aditi','Siddharth','Nisha','Varun','Jhanvi','Parth','Hetal','Jay','Krupa','Dev','Mitali'];
+  const last=['Patel','Shah','Mehta','Iyer','Reddy','Sharma','Gupta','Desai','Joshi','Nair','Kapoor','Rao','Bhatt','Trivedi','Menon','Agarwal','Kulkarni','Singh','Das','Chopra'];
+  const cities=['Ahmedabad','Mumbai','Bengaluru','Delhi','Pune','Surat','Hyderabad','Jaipur','Chennai','Kolkata'];
+  const cw=[16,15,14,12,9,8,8,6,6,6];
+  const cats=['Whole spices','Masala blends','Dry fruits','Assam & Darjeeling tea','Pickles','Festive gift boxes'];
+  const catw=[26,24,18,14,10,8];
+  const start=Date.UTC(2024,9,1)/DAY, end=Date.UTC(2026,8,30)/DAY;
+  const rows=[];let oid=10001;
+  for(let i=0;i<560;i++){
+    const id='CUS-'+String(2001+i);
+    const name=pick(first)+' '+pick(last);
+    const city=pick(cities,cw);
+    // acquisition skews recent as the brand grows
+    const acq=Math.floor(start+(end-start)*Math.pow(rnd(),0.8));
+    const r=rnd();
+    let gap,life,basket;
+    if(r<0.47){gap=9999;life=0;basket=780}
+    else if(r<0.76){gap=75+rnd()*90;life=90+rnd()*330;basket=920}
+    else if(r<0.93){gap=30+rnd()*35;life=180+rnd()*560;basket=1150}
+    else {gap=17+rnd()*20;life=420+rnd()*500;basket=2300}
+    const fav=pick(cats,catw);
+    let d=acq;
+    while(d<=end && d<=acq+life+1){
+      const amt=Math.max(199,Math.round(basket*Math.exp((rnd()-.5)*0.9)/10)*10+(Math.floor(new Date(d*DAY).getUTCMonth())===9||new Date(d*DAY).getUTCMonth()===10?400:0));
+      const dt=new Date(d*DAY);
+      rows.push({order_id:'ORD-'+(oid++),customer_id:id,customer_name:name,city,order_date:dt.toISOString().slice(0,10),category:rnd()<.6?fav:pick(cats,catw),amount:amt});
+      if(gap>=9999)break;
+      d=Math.round(d+gap*(0.55+rnd()*0.9));
+    }
+  }
+  rows.sort((a,b)=>a.order_date<b.order_date?-1:1);
+  return rows;
+}
+
+/* ---------- parsing ---------- */
+const MONTHS={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+function parseDay(v,order){
+  if(v==null)return null;
+  let s=String(v).trim();if(!s)return null;
+  let m;
+  if((m=s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/)))return Date.UTC(+m[1],+m[2]-1,+m[3])/DAY;
+  if((m=s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})/))){
+    let a=+m[1],b=+m[2],y=+m[3];if(y<100)y+=2000;
+    let d=order==='MDY'?b:a,mo=order==='MDY'?a:b;
+    if(mo>12&&d<=12){const t=d;d=mo;mo=t}
+    if(mo<1||mo>12||d<1||d>31)return null;
+    return Date.UTC(y,mo-1,d)/DAY;
+  }
+  if((m=s.match(/^(\d{1,2})[\s\-]+([A-Za-z]{3})[A-Za-z]*[\s\-,]+(\d{4})/))&&MONTHS[m[2].toLowerCase()]!=null)return Date.UTC(+m[3],MONTHS[m[2].toLowerCase()],+m[1])/DAY;
+  if(/^\d{5}(\.\d+)?$/.test(s)){const n=+s;if(n>20000&&n<80000)return Math.floor(n-25569)} // Excel serial
+  const t=Date.parse(s);if(!isNaN(t)){const d=new Date(t);return Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())/DAY}
+  return null;
+}
+function guessDateOrder(vals){
+  let dmy=0,mdy=0;
+  for(const v of vals.slice(0,500)){const m=String(v).match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.]/);if(!m)continue;if(+m[1]>12)dmy++;if(+m[2]>12)mdy++}
+  return mdy>dmy?'MDY':'DMY';
+}
+const num=v=>{if(typeof v==='number')return v;const s=String(v??'').replace(/[^0-9.\-]/g,'');const n=parseFloat(s);return isNaN(n)?null:n};
+
+const FIELDS=[
+  {k:'customer',label:'Customer',req:true,re:[/^(customer|client|buyer)[ _-]?(id|code|no)$/i,/(customer|client|buyer).*(id|code)/i,/email/i,/(phone|mobile)/i,/customer/i]},
+  {k:'date',label:'Order date',req:true,re:[/order[ _-]?date/i,/^date$/i,/created/i,/date|time/i]},
+  {k:'amount',label:'Amount',req:true,re:[/^(total|amount|net[ _-]?amount|order[ _-]?total|grand[ _-]?total)$/i,/total|amount|revenue|sales|gmv|value/i,/price/i]},
+  {k:'order',label:'Order ID',re:[/order[ _-]?(id|no|number|#)/i,/invoice|bill[ _-]?no|txn|transaction/i]},
+  {k:'name',label:'Customer name',re:[/(customer|client|billing)[ _-]?name/i,/^name$/i,/name/i]},
+  {k:'city',label:'City / region',re:[/city/i,/town|district/i,/state|region/i]},
+  {k:'category',label:'Category / product',re:[/categor/i,/product[ _-]?type|collection/i,/product|item|sku/i]},
+];
+function autoMap(headers){
+  const used=new Set(),map={};
+  for(const f of FIELDS){
+    for(const re of f.re){const h=headers.find(h=>!used.has(h)&&re.test(h));if(h){map[f.k]=h;used.add(h);break}}
+  }
+  if(map.name&&map.customer===map.name)delete map.name;
+  return map;
+}
+
+/* ---------- analysis ---------- */
+function analyse(rows,map,dateOrder){
+  const byOrder=new Map();let skipped=0;
+  rows.forEach((r,i)=>{
+    const cid=String(r[map.customer]??'').trim();
+    const day=parseDay(r[map.date],dateOrder);
+    const amt=num(r[map.amount]);
+    if(!cid||day==null||amt==null){skipped++;return}
+    const key=map.order&&r[map.order]!=null&&String(r[map.order]).trim()!==''?cid+'|'+String(r[map.order]).trim():'row'+i;
+    let o=byOrder.get(key);
+    if(!o){o={cid,day,amt:0,cats:{},name:map.name?String(r[map.name]??'').trim():'',city:map.city?String(r[map.city]??'').trim():''};byOrder.set(key,o)}
+    o.amt+=amt;o.day=Math.min(o.day,day);
+    if(map.category){const c=String(r[map.category]??'').trim();if(c)o.cats[c]=(o.cats[c]||0)+amt}
+  });
+  const orders=[...byOrder.values()].filter(o=>o.amt>0);
+  if(orders.length<10) throw new Error('Fewer than 10 usable orders were found. Check that the customer, date and amount columns are matched correctly.');
+  orders.sort((a,b)=>a.day-b.day);
+  const lastDay=orders[orders.length-1].day, firstDay=orders[0].day, asOf=lastDay+1;
+
+  const cm=new Map();
+  for(const o of orders){
+    let c=cm.get(o.cid);
+    if(!c){c={id:o.cid,name:'',city:'',days:[],amts:[],revenue:0,cats:{}};cm.set(o.cid,c)}
+    c.days.push(o.day);c.amts.push(o.amt);c.revenue+=o.amt;
+    if(o.name)c.name=o.name; if(o.city)c.city=o.city;
+    for(const k in o.cats)c.cats[k]=(c.cats[k]||0)+o.cats[k];
+  }
+  const customers=[...cm.values()];
+  const gaps=[],second=[];
+  for(const c of customers){
+    c.n=c.days.length;c.first=c.days[0];c.last=c.days[c.n-1];c.recency=asOf-c.last;
+    c.aov=c.revenue/c.n;
+    for(let i=1;i<c.n;i++)gaps.push(c.days[i]-c.days[i-1]);
+    if(c.n>1){second.push(c.days[1]-c.days[0]);c.avgGap=(c.last-c.first)/(c.n-1)}
+    c.topCat=Object.entries(c.cats).sort((a,b)=>b[1]-a[1])[0]?.[0]||'';
+  }
+  const storeGap=Math.max(7,median(gaps)||60);
+  const medSecond=Math.max(7,median(second)||storeGap);
+  const p80Second=second.length?quant([...second].sort((a,b)=>a-b),.8):medSecond*2;
+
+  // RFM
+  const rs=customers.map(c=>c.recency).sort((a,b)=>a-b);
+  const ms=customers.map(c=>c.revenue).sort((a,b)=>a-b);
+  const rq=[.2,.4,.6,.8].map(q=>quant(rs,q)), mq=[.2,.4,.6,.8].map(q=>quant(ms,q));
+  for(const c of customers){
+    c.R=c.recency<=rq[0]?5:c.recency<=rq[1]?4:c.recency<=rq[2]?3:c.recency<=rq[3]?2:1;
+    c.F=c.n>=6?5:c.n>=4?4:c.n;
+    c.M=c.revenue<=mq[0]?1:c.revenue<=mq[1]?2:c.revenue<=mq[2]?3:c.revenue<=mq[3]?4:5;
+    c.seg=segmentOf(c.R,c.F,c.M);
+    // churn rhythm
+    const expected=c.n>=3?Math.max(c.avgGap,7):c.n===2?(c.avgGap+storeGap)/2:p80Second;
+    c.expected=expected;c.ratio=c.recency/expected;
+    c.status=(c.ratio>6||c.recency>365)?'Lapsed':c.ratio<=1.5?'Active':c.ratio<=3?'Cooling':'At risk';
+    // 12-month projected value (simple rate × basket × survival)
+    const tenure=Math.max(c.last-c.first,90);
+    const rate=c.n>1?Math.min(((c.n-1)/tenure)*365,24):(365/p80Second)*0.35;
+    const survive=Math.exp(-Math.max(0,c.ratio-1)/1.6);
+    c.p12=rate*c.aov*survive;
+  }
+
+  // monthly
+  const mOf=d=>{const x=new Date(d*DAY);return x.getUTCFullYear()*12+x.getUTCMonth()};
+  const fm=new Map(customers.map(c=>[c.id,mOf(c.first)]));
+  const m0=mOf(firstDay),m1=mOf(lastDay);
+  const months=[];for(let m=Math.max(m0,m1-23);m<=m1;m++)months.push({m,newRev:0,retRev:0,orders:0,newCust:0,active:new Set()});
+  const mi=new Map(months.map((x,i)=>[x.m,i]));
+  for(const o of orders){const m=mOf(o.day),i=mi.get(m);if(i==null)continue;const x=months[i];x.orders++;x.active.add(o.cid);if(fm.get(o.cid)===m)x.newRev+=o.amt;else x.retRev+=o.amt}
+  for(const c of customers){const i=mi.get(fm.get(c.id));if(i!=null)months[i].newCust++}
+
+  // cohorts (last 12 cohort months)
+  const cohortStart=Math.max(m0,m1-11);
+  const cohorts=[];
+  for(let m=cohortStart;m<=m1;m++)cohorts.push({m,size:0,act:new Array(12).fill(0)});
+  const ci=new Map(cohorts.map((x,i)=>[x.m,i]));
+  const actMonths=new Map();
+  for(const o of orders){let s=actMonths.get(o.cid);if(!s){s=new Set();actMonths.set(o.cid,s)}s.add(mOf(o.day))}
+  for(const c of customers){const f=fm.get(c.id),i=ci.get(f);if(i==null)continue;cohorts[i].size++;for(const m of actMonths.get(c.id)){const k=m-f;if(k>0&&k<12)cohorts[i].act[k]++}}
+
+  // totals
+  const revenue=orders.reduce((a,o)=>a+o.amt,0);
+  const repeaters=customers.filter(c=>c.n>1).length;
+  const sortedRev=customers.map(c=>c.revenue).sort((a,b)=>b-a);
+  const top20=sortedRev.slice(0,Math.max(1,Math.round(sortedRev.length*.2))).reduce((a,b)=>a+b,0);
+  const riskCust=customers.filter(c=>c.status==='At risk'&&c.n>1);
+  const atRiskValue=riskCust.reduce((a,c)=>a+c.revenue/Math.max((c.last-c.first)/365,1),0);
+
+  const segs={};
+  for(const name of SEG_ORDER)segs[name]={name,count:0,revenue:0,recency:0,orders:0,p12:0};
+  for(const c of customers){const s=segs[c.seg];s.count++;s.revenue+=c.revenue;s.recency+=c.recency;s.orders+=c.n;s.p12+=c.p12}
+  const statuses={Active:0,Cooling:0,'At risk':0,Lapsed:0};const statusRev={Active:0,Cooling:0,'At risk':0,Lapsed:0};
+  for(const c of customers){statuses[c.status]++;statusRev[c.status]+=c.revenue}
+
+  const mix=(key)=>{const t=new Map();for(const c of customers){if(key==='city'){if(c.city)t.set(c.city,(t.get(c.city)||0)+c.revenue)}else for(const k in c.cats)t.set(k,(t.get(k)||0)+c.cats[k])}return [...t.entries()].sort((a,b)=>b[1]-a[1])};
+
+  return {orders,customers,asOf,firstDay,lastDay,revenue,repeaters,top20Share:top20/revenue,
+    storeGap,medSecond,secondCount:second.length,second,months,cohorts,segs,statuses,statusRev,
+    atRiskValue,riskCount:riskCust.length,skipped,cityMix:mix('city'),catMix:mix('cat')};
+}
+
+const SEG_ORDER=['Champions','Loyal','Potential loyalists','New customers','Promising','Need attention','About to sleep','Cannot lose them','At risk','Hibernating','Lost'];
+function segmentOf(R,F,M){
+  if(R>=4&&F>=4&&M>=4)return 'Champions';
+  if(R<=2&&F>=4&&M>=4)return 'Cannot lose them';
+  if(R>=3&&F>=4)return 'Loyal';
+  if(R<=2&&F>=3)return 'At risk';
+  if(R>=4&&F>=2)return 'Potential loyalists';
+  if(R>=4&&F===1)return 'New customers';
+  if(R===3&&F<=2)return F===2?'Need attention':'Promising';
+  if(R===3)return 'Need attention';
+  if(R===2)return 'About to sleep';
+  if(R===1&&F===1&&M<=2)return 'Lost';
+  return 'Hibernating';
+}
+const SEG_META={
+  'Champions':{tone:'--teal',play:'Reward them. Early access to new lots, referral codes, no discounts needed.'},
+  'Loyal':{tone:'--teal',play:'Upsell bigger packs and subscriptions. Ask for reviews.'},
+  'Potential loyalists':{tone:'--good',play:'Push the third order: bundle offer or a membership trial.'},
+  'New customers':{tone:'--good',play:'Onboarding sequence: usage tips, recipe content, a nudge at day 30.'},
+  'Promising':{tone:'--accent',play:'Recommend a second category they have not tried yet.'},
+  'Need attention':{tone:'--accent',play:'Time-limited offer based on their last purchase.'},
+  'About to sleep':{tone:'--warn',play:'Re-engage now with a reminder before the habit lapses.'},
+  'Cannot lose them':{tone:'--crit',play:'Personal outreach. A call or WhatsApp from the founder, plus a strong win-back.'},
+  'At risk':{tone:'--crit',play:'Win-back offer and a short survey on why they stopped.'},
+  'Hibernating':{tone:'--cold',play:'Low-cost reactivation only: festive campaigns, new launches.'},
+  'Lost':{tone:'--cold',play:'Suppress from paid retargeting. Include only in big seasonal pushes.'},
+};
+const STATUS_TONE={Active:'--good',Cooling:'--accent','At risk':'--warn',Lapsed:'--crit'};
+
+/* ---------- state ---------- */
+let A=null, sourceName='Sample data', isSample=true;
+let parsed=null; // {rows,headers,fileName}
+let filt={q:'',seg:'',status:''}, sort={key:'revenue',dir:-1}, shown=50;
+
+/* ---------- render ---------- */
+function renderAll(){
+  $('#srcName').textContent=sourceName;
+  $('#srcDot').style.background=isSample?'var(--accent)':'var(--teal)';
+  $('#srcMeta').textContent='· '+int(A.orders.length)+' orders · '+dstr(A.firstDay)+' to '+dstr(A.lastDay);
+  $('#asOf').textContent='As of '+dstr(A.asOf)+(isSample?' · sample pantry D2C store':'');
+  renderKpis();renderMonthly();renderReads();renderMix();renderSegments();renderStatus();renderCohorts();renderSecond();
+  const opts=['<option value="">All segments</option>'].concat(SEG_ORDER.filter(s=>A.segs[s].count).map(s=>`<option>${s}</option>`));
+  $('#fSeg').innerHTML=opts.join('');$('#fSeg').value=filt.seg;
+  renderCustomers();
+}
+
+function renderKpis(){
+  const c=A.customers.length;
+  const k=[
+    ['Customers',int(c),int(A.months.at(-1)?.newCust||0)+' new last month'],
+    ['Revenue',money(A.revenue),'avg '+money(A.revenue/c)+' per customer'],
+    ['Orders',int(A.orders.length),(A.orders.length/c).toFixed(2)+' per customer'],
+    ['Avg order value',money(A.revenue/A.orders.length),'median '+money(median(A.orders.map(o=>o.amt)))],
+    ['Repeat rate',pct(A.repeaters/c),int(A.repeaters)+' placed 2+ orders'],
+    ['Revenue at risk',money(A.atRiskValue),int(A.riskCount)+' repeat buyers overdue',true],
+  ];
+  $('#kpis').innerHTML=k.map(([l,v,s,al])=>`<div class="kpi${al?' alert':''}"><span class="eyebrow">${l}</span><span class="v">${v}</span><span class="s">${s}</span></div>`).join('');
+}
+
+function niceMax(v){if(v<=0)return 1;const p=Math.pow(10,Math.floor(Math.log10(v)));const n=v/p;return(n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10)*p}
+function renderMonthly(){
+  const ms=A.months, W=720,H=250,L=56,R=8,T=12,B=30;
+  const max=niceMax(Math.max(...ms.map(m=>m.newRev+m.retRev)));
+  const bw=(W-L-R)/ms.length, y=v=>T+(H-T-B)*(1-v/max);
+  let g='';
+  for(let i=0;i<=4;i++){const v=max*i/4,yy=y(v);g+=`<line x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}" style="stroke:var(--line)" stroke-width="1"/><text x="${L-8}" y="${yy+3}" text-anchor="end">${money(v)}</text>`}
+  const step=ms.length>14?3:ms.length>8?2:1;
+  ms.forEach((m,i)=>{
+    const x=L+i*bw+bw*.16,w=bw*.68;
+    const yr=y(m.retRev),yn=y(m.retRev+m.newRev);
+    g+=`<g class="mbar" data-i="${i}"><rect x="${L+i*bw}" y="${T}" width="${bw}" height="${H-T-B}" style="fill:transparent"/>`+
+      `<rect x="${x}" y="${yr}" width="${w}" height="${Math.max(0,H-B-yr)}" rx="2" style="fill:var(--teal)"/>`+
+      `<rect x="${x}" y="${yn}" width="${w}" height="${Math.max(0,yr-yn-1)}" rx="2" style="fill:var(--accent)"/></g>`;
+    if((ms.length-1-i)%step===0)g+=`<text x="${L+i*bw+bw/2}" y="${H-10}" text-anchor="middle">${mlabel(m.m)}</text>`;
+  });
+  $('#monthly').innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Monthly revenue split by first-month and returning customers">${g}</svg>`;
+  const last=ms.at(-1);
+  const read=i=>{const m=ms[i],t=m.newRev+m.retRev;$('#monthlyRead').innerHTML=`<b>${MON[m.m%12]} ${Math.floor(m.m/12)}</b> · ${money(t)} total · ${money(m.retRev)} returning (${pct(t?m.retRev/t:0)}) · ${int(m.newCust)} new customers · ${int(m.active.size)} active buyers`};
+  read(ms.length-1);
+  $('#monthly').querySelectorAll('.mbar').forEach(el=>{el.addEventListener('mouseenter',()=>read(+el.dataset.i));el.addEventListener('click',()=>read(+el.dataset.i))});
+  $('#monthly').addEventListener('mouseleave',()=>read(ms.length-1));
+}
+
+function quickReads(){
+  const out=[], c=A.customers.length, S=A.segs;
+  out.push({tone:'--teal',t:`<b>Top 20% of customers bring ${pct(A.top20Share)} of revenue.</b> ${A.top20Share>.6?'Revenue is concentrated: protect these accounts first.':'Revenue is fairly spread out, so growth depends on lifting the middle.'}`});
+  const oneTime=c-A.repeaters;
+  out.push({tone:'--accent',t:`<b>${pct(oneTime/c)} of customers have ordered only once.</b> Those who do come back usually return in about ${Math.round(A.medSecond)} days, so that is the window for a second-order nudge.`});
+  const risk=S['At risk'].count+S['Cannot lose them'].count;
+  if(risk)out.push({tone:'--crit',t:`<b>${int(risk)} once-valuable customers have gone quiet</b> (At risk + Cannot lose them). Together they spent ${money(S['At risk'].revenue+S['Cannot lose them'].revenue)} with you.`});
+  const lm=A.months.slice(-3),pm=A.months.slice(-6,-3);
+  const sr=a=>{const r=a.reduce((x,m)=>x+m.retRev,0),t=a.reduce((x,m)=>x+m.retRev+m.newRev,0);return t?r/t:0};
+  if(pm.length===3){const a=sr(lm),b=sr(pm),same=Math.abs(a-b)<.01;out.push({tone:same||a>b?'--good':'--warn',t:`<b>Returning customers made ${pct(a)} of revenue in the last 3 months</b>, ${same?'level with':a>b?'up from':'down from'} ${pct(b)} the quarter before.`})}
+  const m1=A.cohorts.filter(x=>x.size>=5&&x.m+1<=A.months.at(-1).m);
+  if(m1.length>=4){const h=Math.floor(m1.length/2);const avg=a=>a.reduce((s,x)=>s+x.act[1]/x.size,0)/a.length;const early=avg(m1.slice(0,h)),late=avg(m1.slice(h));
+    out.push({tone:late>=early?'--good':'--warn',t:`<b>Month-1 return rate is ${pct(late)} for recent cohorts</b> against ${pct(early)} for older ones. ${late>=early?'Onboarding is improving.':'Newer customers are coming back less often.'}`})}
+  const champ=A.customers.filter(x=>x.seg==='Champions'&&x.topCat);
+  if(champ.length>=5){const t={};champ.forEach(x=>t[x.topCat]=(t[x.topCat]||0)+1);const [cat,n]=Object.entries(t).sort((a,b)=>b[1]-a[1])[0];out.push({tone:'--teal',t:`<b>${cat}</b> is the main category for ${pct(n/champ.length)} of Champions. It is the strongest hook for new customer offers.`})}
+  return out;
+}
+function renderReads(){$('#reads').innerHTML=quickReads().map(r=>`<li style="--tone:var(${r.tone})"><span>${r.t}</span></li>`).join('')}
+
+function renderMix(){
+  const box=$('#mix');const cards=[];
+  const list=(title,entries)=>{const tot=entries.reduce((a,b)=>a+b[1],0);const top=entries.slice(0,6);const max=top[0]?.[1]||1;
+    return `<div class="card"><div class="card-h"><h3>${title}</h3><span class="eyebrow">share of revenue</span></div><div class="barlist">${top.map(([k,v])=>`<div class="barrow"><span>${esc(k)}</span><span class="num muted">${money(v)} · ${pct(v/tot)}</span><div class="track"><div class="fill" style="width:${(v/max*100).toFixed(1)}%"></div></div></div>`).join('')}</div></div>`};
+  if(A.catMix.length)cards.push(list('Categories',A.catMix));
+  if(A.cityMix.length)cards.push(list('Cities',A.cityMix));
+  // order count distribution always
+  const b=[1,2,3,4,5,6].map(n=>A.customers.filter(c=>n<6?c.n===n:c.n>=6).length);const mx=Math.max(...b);
+  cards.push(`<div class="card"><div class="card-h"><h3>Orders per customer</h3><span class="eyebrow">customers</span></div><div class="barlist">${b.map((v,i)=>`<div class="barrow"><span>${i<5?i+1:'6+'} order${i?'s':''}</span><span class="num muted">${int(v)} · ${pct(v/A.customers.length)}</span><div class="track"><div class="fill" style="width:${(v/mx*100).toFixed(1)}%;background:var(--accent)"></div></div></div>`).join('')}</div></div>`);
+  box.innerHTML=cards.join('');
+  box.style.gridTemplateColumns=`repeat(${cards.length},minmax(0,1fr))`;
+  if(window.matchMedia?.('(max-width:980px)')?.matches)box.style.gridTemplateColumns='minmax(0,1fr)';
+}
+
+function renderSegments(){
+  const c=A.customers.length,maxShare=Math.max(...SEG_ORDER.map(s=>A.segs[s].revenue/A.revenue));
+  const rows=SEG_ORDER.filter(s=>A.segs[s].count).map(s=>{const g=A.segs[s],m=SEG_META[s];
+    return `<tr data-seg="${s}" tabindex="0"><td><div class="seg-name"><span class="sw" style="background:var(${m.tone})"></span>${s}</div></td>
+    <td class="num">${int(g.count)}<div class="muted" style="font-size:.74rem">${pct(g.count/c,1)}</div></td>
+    <td><div class="mini"><span class="track"><span class="fill" style="display:block;width:${(g.revenue/A.revenue/maxShare*100).toFixed(1)}%;background:var(${m.tone})"></span></span><span class="num">${pct(g.revenue/A.revenue)}</span></div></td>
+    <td class="num">${Math.round(g.recency/g.count)}d</td>
+    <td class="num">${(g.orders/g.count).toFixed(1)}</td>
+    <td class="play">${m.play}</td></tr>`}).join('');
+  $('#segTable').innerHTML=`<thead><tr><th>Segment</th><th>Customers</th><th>Revenue share</th><th>Last order</th><th>Orders</th><th>What to do</th></tr></thead><tbody>${rows}</tbody>`;
+}
+function renderStatus(){
+  const c=A.customers.length;
+  $('#statusBar').innerHTML=Object.entries(A.statuses).filter(e=>e[1]).map(([k,v])=>`<span title="${k}: ${v}" style="flex:${v};background:var(${STATUS_TONE[k]})"></span>`).join('');
+  const desc={Active:'buying on rhythm','Cooling':'up to 3× their usual gap','At risk':'3–6× overdue',Lapsed:'6× overdue or 1 year+ silent'};
+  $('#statusLegend').innerHTML=Object.entries(A.statuses).map(([k,v])=>`<div><span class="chip" style="--tone:var(${STATUS_TONE[k]})">${k}</span><span class="num">${int(v)} <span class="muted" style="font-size:.8rem">${pct(v/c)}</span></span><span class="muted" style="font-size:.78rem">${desc[k]} · ${money(A.statusRev[k])} lifetime</span></div>`).join('');
+}
+function renderCohorts(){
+  const lastM=A.months.at(-1).m;
+  const cols=Math.min(12,A.cohorts.length);
+  let h=`<table class="cohort"><thead><tr><th class="rowh">Cohort</th><th>Size</th>${Array.from({length:cols-1},(_,k)=>`<th>M${k+1}</th>`).join('')}</tr></thead><tbody>`;
+  for(const co of A.cohorts){
+    h+=`<tr><th class="rowh">${mlabel(co.m)}</th><th>${co.size}</th>`;
+    for(let k=1;k<cols;k++){
+      if(co.m+k>lastM||!co.size){h+='<td class="na"></td>';continue}
+      const r=co.act[k]/co.size;
+      h+=`<td title="${pct(r,1)} of ${co.size}" style="background:color-mix(in srgb,var(--teal) ${Math.min(100,Math.round(r*260))}%,var(--surface-2))">${r?Math.round(r*100):'·'}</td>`;
+    }
+    h+='</tr>';
+  }
+  $('#cohortBox').innerHTML=h+'</tbody></table><p class="muted" style="font-size:.78rem;margin:10px 0 0">Values are % of the cohort placing at least one order in that month after their first.</p>';
+}
+function renderSecond(){
+  const c=A.customers.length, s=[...A.second].sort((a,b)=>a-b);
+  const within=d=>s.filter(x=>x<=d).length;
+  const rows=[30,60,90,180].map(d=>[d,within(d)/c]);
+  $('#secondOrder').innerHTML=`<div style="display:grid;gap:14px">
+    <div><span class="num" style="font-size:1.6rem">${pct(A.repeaters/c)}</span><div class="muted" style="font-size:.84rem">of customers ever place a second order</div></div>
+    <div><span class="num" style="font-size:1.6rem">${Math.round(A.medSecond)} days</span><div class="muted" style="font-size:.84rem">median wait between first and second order</div></div>
+    <div class="barlist">${rows.map(([d,r])=>`<div class="barrow"><span>Second order within ${d} days</span><span class="num muted">${pct(r)}</span><div class="track"><div class="fill" style="width:${(r/Math.max(rows[3][1],.01)*100).toFixed(1)}%"></div></div></div>`).join('')}</div>
+    <p class="note" style="margin:0">Send your second-order nudge before day ${Math.max(7,Math.round(A.medSecond*.8))}. After that, the odds of a return drop off.</p></div>`;
+}
+
+const COLS=[
+  {k:'name',l:'Customer'},{k:'city',l:'City'},{k:'n',l:'Orders',r:1},{k:'revenue',l:'Spend',r:1},{k:'aov',l:'AOV',r:1},
+  {k:'recency',l:'Last order',r:1},{k:'seg',l:'Segment'},{k:'status',l:'Status'},{k:'p12',l:'Next 12 mo',r:1},{k:'rfm',l:'RFM'}
+];
+function filtered(){
+  const q=filt.q.toLowerCase();
+  let list=A.customers.filter(c=>(!filt.seg||c.seg===filt.seg)&&(!filt.status||c.status===filt.status)&&(!q||(c.name+' '+c.id+' '+c.city).toLowerCase().includes(q)));
+  const k=sort.key;
+  list.sort((a,b)=>{let x=k==='rfm'?a.R*100+a.F*10+a.M:a[k],y=k==='rfm'?b.R*100+b.F*10+b.M:b[k];if(k==='name'){x=(a.name||a.id).toLowerCase();y=(b.name||b.id).toLowerCase()}return x<y?-sort.dir:x>y?sort.dir:0});
+  return list;
+}
+function renderCustomers(){
+  const list=filtered();const hasCity=A.customers.some(c=>c.city);
+  const cols=COLS.filter(c=>c.k!=='city'||hasCity);
+  const head=`<thead><tr>${cols.map(c=>`<th data-k="${c.k}" class="${c.r?'r':''}"${sort.key===c.k?` data-dir="${sort.dir<0?'↓':'↑'}"`:''}>${c.l}</th>`).join('')}</tr></thead>`;
+  const body=list.slice(0,shown).map(c=>`<tr>
+    <td>${esc(c.name||c.id)}${c.name?`<small>${esc(c.id)}</small>`:''}</td>
+    ${hasCity?`<td>${esc(c.city)}</td>`:''}
+    <td class="r num">${c.n}</td><td class="r num">${money(c.revenue,false)}</td><td class="r num">${money(c.aov,false)}</td>
+    <td class="r num">${c.recency}d<small>${dstr(c.last)}</small></td>
+    <td><span class="chip" style="--tone:var(${SEG_META[c.seg].tone})">${c.seg}</span></td>
+    <td><span class="chip" style="--tone:var(${STATUS_TONE[c.status]})">${c.status}</span></td>
+    <td class="r num">${money(c.p12,false)}</td>
+    <td class="num muted">${c.R}${c.F}${c.M}</td></tr>`).join('');
+  $('#custTable').innerHTML=head+`<tbody>${body||`<tr><td colspan="${cols.length}" class="muted" style="padding:20px">No customers match these filters.</td></tr>`}</tbody>`;
+  $('#custCount').textContent=`Showing ${int(Math.min(shown,list.length))} of ${int(list.length)} customers`;
+  $('#btnMore').hidden=shown>=list.length;
+}
+
+/* ---------- events ---------- */
+$('#custTable').addEventListener('click',e=>{const th=e.target.closest('th');if(!th)return;const k=th.dataset.k;sort=sort.key===k?{key:k,dir:-sort.dir}:{key:k,dir:['name','city','seg','status','recency'].includes(k)?1:-1};renderCustomers()});
+$('#q').addEventListener('input',e=>{filt.q=e.target.value;shown=50;renderCustomers()});
+$('#fSeg').addEventListener('change',e=>{filt.seg=e.target.value;shown=50;renderCustomers()});
+$('#fStatus').addEventListener('change',e=>{filt.status=e.target.value;shown=50;renderCustomers()});
+$('#btnMore').addEventListener('click',()=>{shown+=50;renderCustomers()});
+const goSeg=tr=>{filt.seg=tr.dataset.seg;$('#fSeg').value=filt.seg;shown=50;renderCustomers();$('#customers').scrollIntoView({behavior:window.matchMedia?.('(prefers-reduced-motion:reduce)')?.matches?'auto':'smooth'})};
+$('#segTable').addEventListener('click',e=>{const tr=e.target.closest('tr[data-seg]');if(tr)goSeg(tr)});
+$('#segTable').addEventListener('keydown',e=>{const tr=e.target.closest('tr[data-seg]');if(tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault();goSeg(tr)}});
+$('#currency').addEventListener('change',e=>{currency=e.target.value;try{localStorage.setItem('cig-cur',currency)}catch{}renderAll()});
+try{const c=localStorage.getItem('cig-cur');if(c&&CUR[c]){currency=c;$('#currency').value=c}}catch{}
+addEventListener('resize',()=>{clearTimeout(renderMix.t);renderMix.t=setTimeout(()=>A&&renderMix(),150)});
+
+/* upload flow */
+$('#btnUpload').addEventListener('click',()=>{const u=$('#uploader');u.hidden=!u.hidden;if(!u.hidden)u.scrollIntoView({block:'start'})});
+$('#btnSample').addEventListener('click',()=>{loadSample();$('#uploader').hidden=true;toast('Sample data loaded')});
+const drop=$('#drop');
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over')}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over')}));
+drop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)readFile(f)});
+$('#file').addEventListener('change',e=>{const f=e.target.files[0];if(f)readFile(f);e.target.value=''});
+document.addEventListener('dragover',e=>e.preventDefault());
+document.addEventListener('drop',e=>{if(e.target.closest('#drop'))return;e.preventDefault();const f=e.dataTransfer?.files?.[0];if(f){$('#uploader').hidden=false;readFile(f)}});
+
+function readFile(f){
+  $('#upErr').textContent='';
+  if(typeof Papa==='undefined'){$('#upErr').textContent='The CSV reader did not load. Check your connection and reload the page.';return}
+  Papa.parse(f,{header:true,skipEmptyLines:'greedy',dynamicTyping:false,complete:res=>{
+    const headers=(res.meta.fields||[]).filter(Boolean);
+    if(!res.data.length||headers.length<3){$('#upErr').textContent='This file has fewer than three columns or no rows. Export it as a CSV with a header row.';return}
+    parsed={rows:res.data,headers,fileName:f.name};
+    showMapper();
+  },error:err=>{$('#upErr').textContent='Could not read the file: '+err.message}});
+}
+function showMapper(){
+  const map=autoMap(parsed.headers);
+  const dates=map.date?parsed.rows.map(r=>r[map.date]):[];
+  const order=guessDateOrder(dates);
+  const opt=(sel)=>`<option value="">— not in file —</option>`+parsed.headers.map(h=>`<option${h===sel?' selected':''}>${esc(h)}</option>`).join('');
+  $('#mapGrid').innerHTML=FIELDS.map(f=>`<label class="field">${f.label}${f.req?'<span class="req">required</span>':''}<select id="map-${f.k}">${opt(map[f.k])}</select></label>`).join('')+
+    `<label class="field">Date format<select id="map-dateorder"><option value="DMY"${order==='DMY'?' selected':''}>Day first (31-12-2025)</option><option value="MDY"${order==='MDY'?' selected':''}>Month first (12-31-2025)</option></select></label>`;
+  $('#mapInfo').textContent=`${parsed.fileName} · ${int(parsed.rows.length)} rows · ${parsed.headers.length} columns`;
+  $('#mapper').hidden=false;$('#mapErr').textContent='';
+}
+$('#btnAnalyze').addEventListener('click',()=>{
+  const map={};FIELDS.forEach(f=>{const v=$('#map-'+f.k).value;if(v)map[f.k]=v});
+  const miss=FIELDS.filter(f=>f.req&&!map[f.k]).map(f=>f.label.toLowerCase());
+  if(miss.length){$('#mapErr').textContent='Choose a column for '+miss.join(', ')+'.';return}
+  try{
+    A=analyse(parsed.rows,map,$('#map-dateorder').value);
+    sourceName=parsed.fileName;isSample=false;filt={q:'',seg:'',status:''};$('#q').value='';$('#fStatus').value='';shown=50;
+    resetAI();renderAll();$('#uploader').hidden=true;
+    toast(`Analysed ${int(A.customers.length)} customers`+(A.skipped?` · ${int(A.skipped)} rows skipped`:''));
+    scrollTo({top:0});
+  }catch(err){$('#mapErr').textContent=err.message}
+});
+
+function loadSample(){
+  A=analyse(makeSample(),{customer:'customer_id',date:'order_date',amount:'amount',order:'order_id',name:'customer_name',city:'city',category:'category'},'DMY');
+  sourceName='Sample data';isSample=true;filt={q:'',seg:'',status:''};$('#q').value='';$('#fStatus').value='';shown=50;resetAI();renderAll();
+}
+
+/* ---------- AI ---------- */
+function summaryForAI(){
+  const c=A.customers.length;
+  const seg=SEG_ORDER.filter(s=>A.segs[s].count).map(s=>{const g=A.segs[s];return{segment:s,customers:g.count,share_of_customers:+(g.count/c).toFixed(3),share_of_revenue:+(g.revenue/A.revenue).toFixed(3),avg_days_since_last_order:Math.round(g.recency/g.count),avg_orders:+(g.orders/g.count).toFixed(1)}});
+  const cohorts=A.cohorts.filter(x=>x.size).map(x=>({cohort:mlabel(x.m),size:x.size,m1:+(x.act[1]/x.size).toFixed(3),m3:+(x.act[3]/x.size).toFixed(3)}));
+  return {
+    currency, period:{from:dstr(A.firstDay),to:dstr(A.lastDay)}, data_source:isSample?'sample data for a D2C spice & pantry brand in India':'uploaded order export',
+    customers:c, orders:A.orders.length, revenue:Math.round(A.revenue), avg_order_value:Math.round(A.revenue/A.orders.length),
+    repeat_rate:+(A.repeaters/c).toFixed(3), top_20pct_revenue_share:+A.top20Share.toFixed(3),
+    median_days_to_second_order:Math.round(A.medSecond), median_days_between_orders:Math.round(A.storeGap),
+    churn_status:A.statuses, revenue_at_risk_annualised:Math.round(A.atRiskValue),
+    segments:seg, recent_cohorts:cohorts,
+    monthly_last_6:A.months.slice(-6).map(m=>({month:mlabel(m.m),revenue:Math.round(m.newRev+m.retRev),returning_share:+(m.retRev/Math.max(1,m.newRev+m.retRev)).toFixed(3),new_customers:m.newCust})),
+    top_categories:A.catMix.slice(0,6).map(([k,v])=>({category:k,revenue_share:+(v/A.revenue).toFixed(3)})),
+    top_cities:A.cityMix.slice(0,6).map(([k,v])=>({city:k,revenue_share:+(v/A.revenue).toFixed(3)})),
+  };
+}
+let sampleFn=null,aiPlan=null,aiBusy=false;
+function resetAI(){aiPlan=null;$('#aiOut').innerHTML='<p class="note">Press Generate to get five prioritised moves for this customer base, each tied to a segment and a number.</p>';$('#askOut').textContent=''}
+(async()=>{
+  let s=null;try{s=window.claude?.use?await window.claude.use('sample'):null}catch{}
+  sampleFn=s;
+  if(!s){$('#btnAI').disabled=true;$('#btnAsk').disabled=true;$('#aiUnavailable').hidden=false}
+})();
+const ctx=()=>`You are a retail CRM analyst advising an Indian small business owner. Use only the numbers in this JSON summary of their customer data. Amounts are in ${currency}.\n\n${JSON.stringify(summaryForAI())}`;
+function aiError(e){
+  const code=e?.code;
+  if(code==='not_granted')return 'Claude access was not allowed for this page. You can allow it from the artifact\'s Permissions menu.';
+  if(code==='rate_limited')return 'Too many requests just now. Wait a minute and try again.';
+  if(code==='cancelled')return 'Cancelled.';
+  return 'Claude could not answer: '+(e?.message||'unknown error');
+}
+$('#btnAI').addEventListener('click',async()=>{
+  if(!sampleFn||aiBusy)return;aiBusy=true;
+  const b=$('#btnAI');b.disabled=true;b.innerHTML='<span class="spin"></span> Thinking';
+  $('#aiOut').innerHTML='<p class="note">Reading your segments and cohorts. This takes 10 to 40 seconds.</p>';
+  const prompt=ctx()+`\n\nReturn JSON only, with this shape: {"headline": string (one sentence, the single most important finding, cite a number), "moves": [ {"title": string (imperative, under 9 words), "segment": string (one of the segment names or "All"), "why": string (1-2 sentences citing numbers from the summary), "action": string (a concrete campaign or operational step for an Indian D2C/retail business: channel such as WhatsApp, SMS, email, offer, timing), "impact": "high"|"medium"|"low"} ] } with exactly 5 moves ordered by expected revenue impact.`;
+  try{
+    let plan;
+    try{plan=await sampleFn.json(prompt,{modelTier:'default'})}
+    catch(e){if(e?.code&&e.code!=='parse_error'&&e.code!=='invalid_json')throw e;const r=await sampleFn(prompt,{modelTier:'default'});plan=JSON.parse(r.text.slice(r.text.indexOf('{'),r.text.lastIndexOf('}')+1))}
+    aiPlan=plan;renderAI();
+  }catch(e){$('#aiOut').innerHTML=`<p class="err">${esc(aiError(e))}</p>`}
+  finally{aiBusy=false;b.disabled=false;b.textContent=aiPlan?'Regenerate':'Generate insights'}
+});
+function renderAI(){
+  const p=aiPlan;if(!p)return;
+  const tone={high:'--crit',medium:'--accent',low:'--cold'};
+  $('#aiOut').innerHTML=`<p class="ai-head">${esc(p.headline)}</p>`+(p.moves||[]).map((m,i)=>`<div class="ai-card">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="num muted">${i+1}</span><h4>${esc(m.title)}</h4></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">${m.segment?`<span class="chip" style="--tone:var(${SEG_META[m.segment]?.tone||'--teal'})">${esc(m.segment)}</span>`:''}${m.impact?`<span class="chip" style="--tone:var(${tone[m.impact]||'--cold'})">${esc(m.impact)} impact</span>`:''}</div>
+    <p>${esc(m.why)}</p><div class="act"><b>Do this:</b> ${esc(m.action)}</div></div>`).join('');
+}
+let askCtl=null;
+async function ask(q){
+  if(!sampleFn||!q.trim())return;
+  askCtl?.abort();askCtl=new AbortController();
+  const out=$('#askOut');out.textContent='Thinking…';
+  const b=$('#btnAsk');b.disabled=true;
+  try{
+    const r=await sampleFn(ctx()+`\n\nQuestion from the owner: ${q}\n\nAnswer in under 180 words, plain text, no markdown headers. Be specific and cite numbers from the summary. If the summary cannot answer it, say what data would.`,{signal:askCtl.signal,cache:false,onText:({text})=>{out.textContent=text}});
+    out.textContent=r.text;
+  }catch(e){if(e?.code!=='cancelled')out.textContent=aiError(e)}
+  finally{b.disabled=false}
+}
+$('#btnAsk').addEventListener('click',()=>ask($('#askQ').value));
+$('#askQ').addEventListener('keydown',e=>{if(e.key==='Enter')ask(e.target.value)});
+$('#sugg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;$('#askQ').value=b.textContent;ask(b.textContent)});
+
+/* ---------- exports ---------- */
+let dl=null;
+(async()=>{try{dl=window.claude?.use?await window.claude.use('downloads'):null}catch{}
+  if(!dl){$('#btnReport').title='Downloads are available when this page is opened on claude.ai';$('#btnCsv').title=$('#btnReport').title}})();
+async function save(filename,data){
+  if(!dl){toast('Downloads work when this page is opened on claude.ai');return}
+  try{await dl.save({filename,data});toast('Saved '+filename)}
+  catch(e){if(e?.code==='declined')return;toast(e?.code==='rate_limited'?'A save prompt is already open':'Could not save the file: '+(e?.message||e?.code))}
+}
+const stamp=()=>new Date(A.asOf*DAY).toISOString().slice(0,10);
+$('#btnCsv').addEventListener('click',()=>{
+  const q=v=>{const s=String(v??'');return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s};
+  const head=['customer_id','name','city','orders','total_spend','avg_order_value','first_order','last_order','days_since_last_order','R','F','M','rfm_segment','churn_status','projected_12m_value','top_category'];
+  const lines=[head.join(',')].concat(A.customers.slice().sort((a,b)=>b.revenue-a.revenue).map(c=>[c.id,c.name,c.city,c.n,c.revenue.toFixed(2),c.aov.toFixed(2),new Date(c.first*DAY).toISOString().slice(0,10),new Date(c.last*DAY).toISOString().slice(0,10),c.recency,c.R,c.F,c.M,c.seg,c.status,c.p12.toFixed(2),c.topCat].map(q).join(',')));
+  save(`customer-insights-${stamp()}.csv`,lines.join('\n'));
+});
+$('#btnReport').addEventListener('click',()=>save(`customer-insight-report-${stamp()}.html`,buildReport()));
+function buildReport(){
+  const c=A.customers.length;
+  const kp=[['Customers',int(c)],['Revenue',money(A.revenue,false)],['Orders',int(A.orders.length)],['Avg order value',money(A.revenue/A.orders.length,false)],['Repeat rate',pct(A.repeaters/c)],['Revenue at risk (annual)',money(A.atRiskValue,false)]];
+  const strip=s=>s.replace(/<[^>]+>/g,'');
+  const segRows=SEG_ORDER.filter(s=>A.segs[s].count).map(s=>{const g=A.segs[s];return `<tr><td><b>${s}</b></td><td>${int(g.count)} (${pct(g.count/c,1)})</td><td>${pct(g.revenue/A.revenue,1)}</td><td>${Math.round(g.recency/g.count)} days</td><td>${SEG_META[s].play}</td></tr>`}).join('');
+  const top=A.customers.slice().sort((a,b)=>b.revenue-a.revenue).slice(0,25).map(x=>`<tr><td>${esc(x.name||x.id)}</td><td>${esc(x.city)}</td><td>${x.n}</td><td>${money(x.revenue,false)}</td><td>${x.recency}d</td><td>${x.seg}</td><td>${x.status}</td></tr>`).join('');
+  const ai=aiPlan?`<h2>AI action plan</h2><p class="lead">${esc(aiPlan.headline)}</p><ol>${(aiPlan.moves||[]).map(m=>`<li><b>${esc(m.title)}</b> <span class="tag">${esc(m.segment||'')}${m.impact?' · '+esc(m.impact)+' impact':''}</span><br>${esc(m.why)}<br><i>Do this:</i> ${esc(m.action)}</li>`).join('')}</ol>`:'';
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Customer Insight Report · ${stamp()}</title>
+<style>body{font:15px/1.55 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#151a25;max-width:900px;margin:40px auto;padding:0 20px}h1{font-family:Georgia,serif;font-size:28px;margin:0}h2{font-family:Georgia,serif;margin-top:36px;border-bottom:2px solid #b8690a;padding-bottom:4px}.meta{color:#5b6478}.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#dde1ea;border:1px solid #dde1ea;margin-top:20px}.kpis div{background:#fff;padding:12px}.kpis span{display:block;font-size:12px;color:#5b6478;text-transform:uppercase;letter-spacing:.08em}.kpis b{font-size:20px;font-family:Menlo,monospace}table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:7px 8px;border-bottom:1px solid #dde1ea;vertical-align:top}th{color:#5b6478;font-weight:600}ul,ol{padding-left:20px}li{margin-bottom:10px}.lead{font-family:Georgia,serif;font-size:18px}.tag{color:#b8690a;font-size:12px}footer{margin-top:40px;color:#5b6478;font-size:12px}</style></head><body>
+<h1>Customer Insight Report</h1><p class="meta">${esc(sourceName)} · ${dstr(A.firstDay)} to ${dstr(A.lastDay)} · generated ${dstr(A.asOf)}</p>
+<div class="kpis">${kp.map(([l,v])=>`<div><span>${l}</span><b>${v}</b></div>`).join('')}</div>
+<h2>Key findings</h2><ul>${quickReads().map(r=>`<li>${strip(r.t)}</li>`).join('')}</ul>
+${ai}
+<h2>RFM segments</h2><table><tr><th>Segment</th><th>Customers</th><th>Revenue share</th><th>Avg last order</th><th>Recommended play</th></tr>${segRows}</table>
+<h2>Churn status</h2><table><tr><th>Status</th><th>Customers</th><th>Lifetime revenue</th></tr>${Object.entries(A.statuses).map(([k,v])=>`<tr><td>${k}</td><td>${int(v)} (${pct(v/c)})</td><td>${money(A.statusRev[k],false)}</td></tr>`).join('')}</table>
+<h2>Top 25 customers by spend</h2><table><tr><th>Customer</th><th>City</th><th>Orders</th><th>Spend</th><th>Last order</th><th>Segment</th><th>Status</th></tr>${top}</table>
+<footer>Generated with Customer Insight Generator. RFM: recency and spend scored in quintiles; frequency by order count (1, 2, 3, 4–5, 6+). Churn status compares days since last order with each customer's own buying gap.</footer></body></html>`;
+}
+
+/* ---------- boot ---------- */
+loadSample();
+})();
+</script>
+
+</body></html>
